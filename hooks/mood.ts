@@ -5,6 +5,26 @@ export type Signal = { at: number; kind: 'bash-ok' | 'bash-fail' | 'edit' }
 
 export const WINDOW_MS = 15 * 60 * 1000
 
+const KINDS = new Set(['bash-ok', 'bash-fail', 'edit'])
+
+/** Reads one session's signal file, dropping anything malformed. */
+export function parseSignals(text: string): Signal[] {
+  try {
+    const data = JSON.parse(text) as unknown
+    if (!Array.isArray(data)) return []
+    return data.filter(
+      (s): s is Signal => typeof s?.at === 'number' && typeof s?.kind === 'string' && KINDS.has(s.kind),
+    )
+  } catch {
+    return []
+  }
+}
+
+/** Every session's signals in the window, as one list. */
+export function mergeSignals(lists: readonly (readonly Signal[])[], now: number): Signal[] {
+  return lists.flat().filter(s => now - s.at <= WINDOW_MS)
+}
+
 export const PRESETS: Record<string, string> = {
   'deep focus': 'instrumental, steady groove, minimal vocals, nothing jarring',
   'calm debugging': 'calm, unobtrusive, warm, low tempo, soft or no vocals',

@@ -29,7 +29,7 @@ export async function resolveEnv($: $): Promise<Env> {
   const home = (await $.env.get('HOME')) ?? '/tmp'
   // Kept short: a Unix socket path on macOS holds at most 104 bytes.
   const dir = `${home}/.claude/musicflow`
-  await $.process.run(['mkdir', '-p', dir]).catch(() => undefined)
+  await $.process.run(['mkdir', '-p', `${dir}/signals`]).catch(() => undefined)
   const [mpv, ytdlp] = await Promise.all([findBin($, 'mpv'), findBin($, 'yt-dlp')])
   return { home, dir, sock: `${dir}/mpv.sock`, mpv, ytdlp }
 }

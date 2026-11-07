@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Player } from '../types'
 import { parseCommand, parseToolInput } from '../hooks/commands'
-import { autoLabel, manualMood } from '../hooks/mood'
+import { autoLabel, manualMood, mergeSignals, parseSignals } from '../hooks/mood'
 import { buildPrompt, parsePicks, stationName } from '../hooks/recommend'
 import { isGood, parseHits, pick, videoId } from '../hooks/search'
 import { EMPTY_TASTE, blockedIds, describeTaste, dislike, like, recordPlay } from '../hooks/taste'
@@ -116,6 +116,19 @@ describe('mood', () => {
     expect(autoLabel([], now, 15)).toBe('focused work')
     // Old signals fall out of the window.
     expect(autoLabel(edits.map(s => ({ ...s, at: 0 })), now, 15)).toBe('focused work')
+  })
+
+  test('signals from every session add up; junk and old ones drop out', () => {
+    const a = parseSignals(JSON.stringify([{ at: now, kind: 'edit' }, { at: now, kind: 'nope' }, { x: 1 }]))
+    expect(a).toEqual([{ at: now, kind: 'edit' }])
+    expect(parseSignals('not json')).toEqual([])
+    const busy = Array.from({ length: 4 }, () => ({ at: now, kind: 'edit' as const }))
+    const other = Array.from({ length: 3 }, () => ({ at: now, kind: 'edit' as const }))
+    const merged = mergeSignals([busy, other, [{ at: 0, kind: 'edit' }]], now)
+    expect(merged.length).toBe(7)
+    // Neither session alone reaches 5 edits; together they do.
+    expect(autoLabel(busy, now, 15)).toBe('focused work')
+    expect(autoLabel(merged, now, 15)).toBe('deep focus')
   })
 
   test('a preset name keeps its description', () => {

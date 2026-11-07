@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Layout, Library, Mood, Player, Playlist, Source, Station, Track } from '../types'
 import { type Action, HELP, parseCommand, parseToolInput, type ToolInput } from './commands'
-import { DEFAULT_MOOD, PRESETS, type Signal, autoMood, manualMood, normalizeMood } from './mood'
+import { DEFAULT_MOOD, PRESETS, type Signal, WINDOW_MS, autoMood, manualMood, mergeSignals, normalizeMood, parseSignals } from './mood'
 import { type Env, ensure, ipc, mix, resolveEnv, search, snapshot } from './mpv'
 import { SYSTEM, buildPrompt, parsePicks, stationName } from './recommend'
 import { isGood, pick, radioUrl, toTrack, watchUrl } from './search'
@@ -60,7 +60,12 @@ const S = {
   lastFailAt: 0,
   tick: 0,
   prev: null as { track: Track; pos: number; dur: number } | null,
+  signalsDirty: false,
+  autoMood: null as { mood: Mood; at: number } | null,
 }
+
+/** What `/music play` picks up after a restart: the queue and the place in the track. */
+type Resume = { source: Source; tracks: Track[]; pos: number; at: number }
 const signals: Signal[] = []
 const meta = new Map<string, Track>()
 
@@ -89,8 +94,11 @@ async function getPlaylists($: $) {
 async function getMood($: $): Promise<Mood> {
   const mood = normalizeMood(await $.store.get('mood'))
   if (mood.mode === 'manual') return mood
-  const auto = normalizeMood(await $.store.get('moodAuto'))
-  return auto.mode === 'auto' ? auto : DEFAULT_MOOD
+  const now = await $.clock.now()
+  if (S.autoMood && now - S.autoMood.at < 60_000) return S.autoMood.mood
+  const computed = autoMood(await allSignals($, now), now, await hour($))
+  S.autoMood = { mood: computed, at: now }
+  return computed
 }
 
 async function hour($: $) {
@@ -99,11 +107,38 @@ async function hour($: $) {
   return Number.isFinite(h) ? h : 12
 }
 
-/** Recomputes the auto mood from this session's signals. */
-async function refreshAutoMood($: $) {
+function signalsDir() {
+  return `${S.env!.dir}/signals`
+}
+
+/**
+ * The auto mood reads every session's signals: each session keeps its own
+ * file, so an idle window never overwrites what a busy one saw.
+ */
+async function allSignals($: $, now: number): Promise<Signal[]> {
+  const lists: Signal[][] = [signals]
+  if (!S.env) return mergeSignals(lists, now)
+  const entries = await $.fs.list(signalsDir()).catch(() => [])
+  for (const f of entries) {
+    if (f.kind !== 'file' || !f.name.endsWith('.json') || f.name === `${S.me}.json`) continue
+    const path = `${signalsDir()}/${f.name}`
+    // A file nobody touched for a whole window holds nothing that counts.
+    if (f.mtimeMs && now - f.mtimeMs > WINDOW_MS) {
+      await $.process.run(['rm', '-f', path]).catch(() => undefined)
+      continue
+    }
+    lists.push(parseSignals((await $.fs.read(path).catch(() => '[]')) as unknown as string))
+  }
+  return mergeSignals(lists, now)
+}
+
+/** Writes this session's recent signals for the other sessions to read. */
+async function flushSignals($: $) {
+  if (!S.env || !S.me || !S.signalsDirty) return
+  S.signalsDirty = false
   const now = await $.clock.now()
-  const mood = autoMood(signals, now, await hour($))
-  await $.store.set('moodAuto', mood)
+  const recent = signals.filter(x => now - x.at <= WINDOW_MS)
+  await $.fs.write(`${signalsDir()}/${S.me}.json`, JSON.stringify(recent)).catch(() => undefined)
 }
 
 async function loadMeta($: $) {
@@ -240,6 +275,45 @@ async function queue($: $, tracks: readonly Track[], mode: 'append-play' | 'repl
   ])
 }
 
+function resumePath() {
+  return `${S.env!.dir}/resume.json`
+}
+
+/** Remembers the queue and the place in the track, for after a restart. */
+async function saveResume($: $, p: Player) {
+  if (!S.env || !p.current) return
+  const resume: Resume = {
+    source: await getSource($),
+    tracks: [p.current, ...p.upcoming].slice(0, 50),
+    pos: Math.max(0, Math.floor(p.pos) - 2),
+    at: await $.clock.now(),
+  }
+  await $.fs.write(resumePath(), JSON.stringify(resume)).catch(() => undefined)
+}
+
+async function readResume($: $): Promise<Resume | null> {
+  if (!S.env) return null
+  try {
+    const r = JSON.parse((await $.fs.read(resumePath())) as unknown as string) as Resume
+    return Array.isArray(r.tracks) && r.tracks.length && r.tracks.every(t => /^[\w-]{11}$/.test(t?.id ?? '')) ? r : null
+  } catch {
+    return null
+  }
+}
+
+/** Puts the remembered queue back, the first track from where it stopped. */
+async function resume($: $, r: Resume): Promise<string> {
+  await setSource($, r.source)
+  await saveMeta($, r.tracks)
+  const [first, ...rest] = r.tracks
+  await ipc($, S.env!, [
+    ['loadfile', watchUrl(first!.id), 'replace', -1, `start=${r.pos}`],
+    ...rest.map(t => ['loadfile', watchUrl(t.id), 'append']),
+  ])
+  await poll($)
+  return `Picking up where you left off: ${name(first!)} at ${clock(r.pos)} (${r.tracks.length} in the queue).`
+}
+
 // ------------------------------------------------------------ recommendations
 
 /** Fills the queue for the active station. Tracks start as they are found. */
@@ -336,7 +410,7 @@ async function act($: $, a: Action): Promise<string> {
   if (a.do === 'mood') {
     const mood = a.text.toLowerCase() === 'auto' ? { ...DEFAULT_MOOD } : manualMood(a.text)
     await $.store.set('mood', mood)
-    if (mood.mode === 'auto') await refreshAutoMood($)
+    S.autoMood = null
     await refreshLibrary($)
     const now = await getMood($)
     return `Mood: ${now.label}${now.mode === 'auto' ? ' (auto)' : ''}. Next picks will follow it.`
@@ -360,6 +434,8 @@ async function act($: $, a: Action): Promise<string> {
 
   // Everything below needs the player.
   if (a.do === 'stop') {
+    const p = await poll($)
+    if (p?.current) await saveResume($, p)
     if (S.env) await ipc($, S.env, [['quit']])
     await setSource($, { kind: 'none' })
     await poll($)
@@ -428,6 +504,8 @@ async function act($: $, a: Action): Promise<string> {
           return 'Playing.'
         }
         if (p.current) return `Playing: ${name(p.current)}`
+        const saved = await readResume($)
+        if (saved) return resume($, saved)
         const source = await getSource($)
         if (source.kind === 'station') return startStation($, source.station)
         return startStation($, MY_WAVE)
@@ -479,7 +557,7 @@ export const register: Register = on => {
       description:
         'Controls the background music player (YouTube via mpv). Use when the user asks to play, stop, skip, like music, ' +
         'start a station ("play something like Boards of Canada"), or change the mood. ' +
-        'Actions: play (value: search query; empty resumes or starts "My wave"), station (value: description), ' +
+        'Actions: play (value: search query; empty resumes, picks up the saved queue after a restart, or starts "My wave"), station (value: description), ' +
         'pause, resume, next, like, dislike, mood (value: text or "auto"), volume (value: 0-100), ' +
         'playlist (value: "save <name>" or "play <name>"), stop, now (what is playing), panel.',
       inputSchema: {
@@ -512,7 +590,8 @@ export const register: Register = on => {
           await refreshLibrary($)
           await loadMeta($)
         }
-        if (S.tick % 600 === 0) await refreshAutoMood($)
+        if (S.tick % 10 === 0) await flushSignals($)
+        if (S.tick % 5 === 0 && S.isLeader && p?.current) await saveResume($, p)
         if (!p || !p.isRunning || !S.isLeader || S.isGenerating) return
         const source = await getSource($)
         const now = await $.clock.now()
@@ -525,6 +604,8 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     // The last session to leave turns the music off.
     if (S.env && e.reason !== 'clear' && !(await othersAlive($))) {
+      const p = await poll($).catch(() => undefined)
+      if (p?.current) await saveResume($, p)
       await ipc($, S.env, [['quit']]).catch(() => undefined)
     }
     return next(e)
@@ -538,6 +619,7 @@ export const register: Register = on => {
     if (tool === 'Bash') signals.push({ at, kind: ran.isError ? 'bash-fail' : 'bash-ok' })
     else if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit') signals.push({ at, kind: 'edit' })
     if (signals.length > 500) signals.splice(0, signals.length - 500)
+    S.signalsDirty = true
     return ran
   })
 
