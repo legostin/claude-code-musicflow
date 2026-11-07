@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Library, Mood, Player, Playlist, Source, Station, Track } from '../types'
+import type { Layout, Library, Mood, Player, Playlist, Source, Station, Track } from '../types'
 import { type Action, HELP, parseCommand, parseToolInput, type ToolInput } from './commands'
 import { DEFAULT_MOOD, PRESETS, type Signal, autoMood, manualMood, normalizeMood } from './mood'
 import { type Env, ensure, ipc, mix, resolveEnv, search, snapshot } from './mpv'
@@ -23,7 +23,7 @@ const MY_WAVE: Station = {
 }
 
 const IDLE_PLAYER: Player = { isRunning: false, isPaused: false, isIdle: true, pos: 0, dur: 0, volume: 0, upcoming: [] }
-const EMPTY_LIBRARY: Library = { source: { kind: 'none' }, stations: [], playlists: [], mood: DEFAULT_MOOD, likedIds: [] }
+const EMPTY_LIBRARY: Library = { source: { kind: 'none' }, stations: [], playlists: [], mood: DEFAULT_MOOD, likedIds: [], layout: 'below' }
 
 const player = atom({ plugin: 'musicflow', key: 'player' } as const, IDLE_PLAYER)
 const library = atom({ plugin: 'musicflow', key: 'library' } as const, EMPTY_LIBRARY)
@@ -79,6 +79,9 @@ async function getSource($: $): Promise<Source> {
 async function getStations($: $) {
   return ((await $.store.get('stations')) as Station[] | undefined) ?? []
 }
+async function getLayout($: $): Promise<Layout> {
+  return (await $.store.get('layout')) === 'above' ? 'above' : 'below'
+}
 async function getPlaylists($: $) {
   return ((await $.store.get('playlists')) as Playlist[] | undefined) ?? []
 }
@@ -118,12 +121,13 @@ async function saveMeta($: $, tracks: readonly Track[]) {
 }
 
 async function refreshLibrary($: $) {
-  const [source, stations, playlists, mood, taste] = await Promise.all([
+  const [source, stations, playlists, mood, taste, layout] = await Promise.all([
     getSource($),
     getStations($),
     getPlaylists($),
     getMood($),
     getTaste($),
+    getLayout($),
   ])
   const liked: Playlist = { name: 'Liked', tracks: taste.likes }
   const next: Library = {
@@ -132,6 +136,7 @@ async function refreshLibrary($: $) {
     playlists: taste.likes.length ? [liked, ...playlists] : playlists,
     mood,
     likedIds: taste.likes.map(t => t.id),
+    layout,
   }
   const held = await read($, library)
   if (JSON.stringify(held) !== JSON.stringify(next)) await update($, library, () => next)
@@ -335,6 +340,13 @@ async function act($: $, a: Action): Promise<string> {
     await refreshLibrary($)
     const now = await getMood($)
     return `Mood: ${now.label}${now.mode === 'auto' ? ' (auto)' : ''}. Next picks will follow it.`
+  }
+  if (a.do === 'layout') {
+    await $.store.set('layout', a.where)
+    await refreshLibrary($)
+    return a.where === 'below'
+      ? 'Now playing shows under the prompt. Controls: /music, the panel (/music), or ask Claude.'
+      : 'Now playing shows above the prompt, with buttons (ctrl+x tab, then p/n/l/d/m).'
   }
   if (a.do === 'playlist-save') {
     const p = await read($, player)
@@ -543,11 +555,25 @@ export const register: Register = on => {
 
   // ------------------------------------------------------------ drawing
 
+  // Under the prompt: one dim line after the engine's own hint, which stays live.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const lib = await read($, library)
+    if (lib.layout !== 'below') return next(e)
+    const p = await read($, player)
+    const busy = await read($, activity)
+    if (!p.current && !busy) return next(e)
+    const line = p.current
+      ? `♪ ${p.isPaused ? '⏸ ' : ''}${name(p.current)}  ${clock(p.pos)} ${bar(p.pos, p.dur, 8)} ${clock(p.dur)}`
+      : `♪ ${busy}`
+    const tail = e.props.tail ? `${e.props.tail} · ${line}` : `  ·  ${line}`
+    return next({ ...e, props: { ...e.props, tail } })
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const p = await read($, player)
     const busy = await read($, activity)
-    if (e.props.hasSurvey || (!p.current && !busy)) return next(e)
     const lib = await read($, library)
+    if (lib.layout !== 'above' || e.props.hasSurvey || (!p.current && !busy)) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const isLiked = p.current ? lib.likedIds.includes(p.current.id) : false
 
@@ -615,6 +641,12 @@ export const register: Register = on => {
           <Text dimColor>{p.isRunning ? `vol ${p.volume}` : ''}</Text>
           <Button key="p-volup" label="+" onPress={() => press($, { do: 'volume', value: Math.min(130, p.volume + 10) })} />
           <Button key="p-stop" dimColor label="Stop" onPress={() => press($, { do: 'stop' })} />
+          <Button
+            key="p-layout"
+            dimColor
+            label={lib.layout === 'below' ? 'Band above ↑' : 'Line below ↓'}
+            onPress={() => press($, { do: 'layout', where: lib.layout === 'below' ? 'above' : 'below' })}
+          />
         </Box>
 
         <Box flexDirection="column">

@@ -56,7 +56,11 @@ export type Library = {
   playlists: Playlist[]
   mood: Mood
   likedIds: string[]
+  /** Where the now-playing line sits: under the prompt (text) or above it (band with buttons). */
+  layout: Layout
 }
+
+export type Layout = 'below' | 'above'
 
 declare module 'claude-code' {
   interface PluginState {

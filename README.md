@@ -7,10 +7,10 @@
 [Русская версия](README.ru.md)
 
 ```
-♪ Roygbiv — Boards of Canada   0:42 ━━━───────── 2:30   ⏸ ⏭ ♡ ✕ ≡
+? for shortcuts  ·  ♪ Roygbiv — Boards of Canada  0:42 ━━────── 2:30
 ```
 
-A small now-playing band sits above the prompt. Press `≡` (or run `/music`) to open the full panel at the side.
+What's playing shows as one dim line under the prompt, after the shortcut hint. Run `/music` to open the full panel at the side. Prefer buttons? `/music layout above` moves it into a band above the prompt with ⏸ ⏭ ♡ ✕ ≡.
 
 ## What it does
 
@@ -61,8 +61,9 @@ In the desktop app, where `/plugin` doesn't run: click **+** next to the prompt 
 | `/music mood <text\|auto>` | set the mood or follow the session |
 | `/music vol <0-100>` | volume |
 | `/music playlist save <name>` · `playlist play <name>` | playlists |
+| `/music layout below\|above` | now-playing under the prompt (text, default) or above it (band with buttons) |
 
-Band hotkeys, once the band has focus (`ctrl+x tab` or a click): `p` pause, `n` next, `l` like, `d` dislike, `m` panel.
+With `layout above`, band hotkeys, once the band has focus (`ctrl+x tab` or a click): `p` pause, `n` next, `l` like, `d` dislike, `m` panel.
 
 The panel shows now-playing with progress and the reason for the pick, the controls, the mood picker and a free-text mood field, the next six tracks with the reason for each, your stations with a field for a new one, and your playlists.
 

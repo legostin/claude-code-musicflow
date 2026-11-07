@@ -14,6 +14,7 @@ export type Action =
   | { do: 'playlist-save'; name: string }
   | { do: 'playlist-play'; name: string }
   | { do: 'stop' }
+  | { do: 'layout'; where: 'below' | 'above' }
   | { do: 'now' }
   | { do: 'help' }
 
@@ -25,6 +26,7 @@ export const HELP = [
   '/music mood <text|auto> — e.g. "calm focus", or auto to follow the session',
   '/music vol <0-100>',
   '/music playlist save <name> | playlist play <name>',
+  '/music layout below|above — now-playing under the prompt (text) or above it (band with buttons)',
 ].join('\n')
 
 /** Parses the text after `/music` into an action, or an error message. */
@@ -72,6 +74,10 @@ export function parseCommand(args: string): Action | { error: string } {
     }
     case 'stop':
       return { do: 'stop' }
+    case 'layout': {
+      const where = (rest[0] ?? '').toLowerCase()
+      return where === 'below' || where === 'above' ? { do: 'layout', where } : { error: 'Usage: /music layout below|above' }
+    }
     case 'now':
       return { do: 'now' }
     case 'help':

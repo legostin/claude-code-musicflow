@@ -21,6 +21,8 @@ describe('commands', () => {
     expect(parseCommand('mood rainy evening')).toEqual({ do: 'mood', text: 'rainy evening' })
     expect(parseCommand('playlist save Night drive')).toEqual({ do: 'playlist-save', name: 'Night drive' })
     expect(parseCommand('aphex twin')).toEqual({ do: 'play', query: 'aphex twin' })
+    expect(parseCommand('layout above')).toEqual({ do: 'layout', where: 'above' })
+    expect('error' in parseCommand('layout left')).toBe(true)
   })
 
   test('parses the tool input', () => {
@@ -146,11 +148,45 @@ const PANE = {
   props: { title: '♪ musicflow', isFocused: false, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
+const LIBRARY = (layout: 'below' | 'above') => ({
+  source: { kind: 'none' },
+  stations: [],
+  playlists: [],
+  mood: { mode: 'auto', label: 'focused work', hint: '' },
+  likedIds: [],
+  layout,
+})
+
+const seed = (layout: 'below' | 'above') => (_: unknown, e: unknown) => {
+  const key = (e as { key?: string }).key
+  if (key === 'player') return { value: { value: PLAYING, version: 1 } }
+  if (key === 'library') return { value: { value: LIBRARY(layout), version: 1 } }
+  return { value: { value: undefined, version: 0 } }
+}
+
+const HINT = {
+  plugin: 'musicflow',
+  component: 'PromptHint',
+  props: { isDraft: false, isWorking: false, hint: '? for shortcuts' },
+} as const
+
 describe('drawing', () => {
-  test('the band shows the track and controls', async ($, on) => {
-    on('state.get', (_, e) =>
-      (e as { key?: string }).key === 'player' ? { value: { value: PLAYING, version: 1 } } : { value: { value: undefined, version: 0 } },
-    )
+  test('under the prompt by default: a line after the hint', async ($, on) => {
+    on('state.get', seed('below'))
+    let tail: string | undefined
+    on('ui.render', ($, e) => {
+      tail = (e.props as { tail?: string }).tail
+      const { Text } = $.ui.resolve(e)
+      return <Text>engine</Text>
+    })
+    const ui = await $.ui.mount({ ...HINT, surface: 'terminal' })
+    expect(tail).toContain('♪ Roygbiv — Boards of Canada')
+    expect(tail).toContain('0:30')
+    await ui.unmount()
+  })
+
+  test('the band shows the track and controls when placed above', async ($, on) => {
+    on('state.get', seed('above'))
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...BAND, surface })
       expect((await ui.find({ type: 'Text', text: /Roygbiv/ }))?.text).toBe('Roygbiv — Boards of Canada')
@@ -171,9 +207,7 @@ describe('drawing', () => {
   })
 
   test('the panel lists what is next, on every surface', async ($, on) => {
-    on('state.get', (_, e) =>
-      (e as { key?: string }).key === 'player' ? { value: { value: PLAYING, version: 1 } } : { value: { value: undefined, version: 0 } },
-    )
+    on('state.get', seed('below'))
     for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
       const ui = await $.ui.mount({ ...PANE, surface })
       expect(await ui.find({ type: 'Text', text: /Awake/ })).toBeDefined()

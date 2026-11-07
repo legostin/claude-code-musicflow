@@ -1,6 +1,6 @@
 {
   "name": "musicflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Background YouTube music in Claude Code: Claude picks tracks for your taste and mood, with stations, playlists, a compact now-playing band and a side panel (mpv + yt-dlp).",
   "author": {
     "name": "Legostin Vyacheslav",
