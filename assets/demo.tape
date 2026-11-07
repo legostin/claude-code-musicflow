@@ -21,16 +21,11 @@ Type "unset CLAUDECODE CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID CLAUDE_C
 # Runs in the folder vhs was started from: use one Claude Code already trusts,
 # or the trust question takes the keys.
 Type "clear" Enter
-Show
-
 Type `claude --allowedTools mcp__musicflow__Music --settings '{"statusLine":{"type":"command","command":"true"}}'`
-Sleep 300ms
 Enter
-Sleep 1s
-Hide
-Sleep 13s
+Sleep 14s
 Show
-Sleep 1s
+Sleep 1500ms
 
 # 1. Play something by name: it starts, and a station of similar music follows.
 Type "/music play Tycho Awake"
