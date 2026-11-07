@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-label="musicflow — YouTube music in Claude Code, picked by Claude for your mood">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14101f"/>
+      <stop offset="0.55" stop-color="#0f1320"/>
+      <stop offset="1" stop-color="#1b0f1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f0abfc"/>
+      <stop offset="0.5" stop-color="#c084fc"/>
+      <stop offset="1" stop-color="#fb923c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.35" r="0.55">
+      <stop offset="0" stop-color="#c084fc" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#c084fc" stop-opacity="0"/>
+    </radialGradient>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
+      .sans { font-family: -apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif; }
+      .eq rect { transform-box: fill-box; transform-origin: 50% 100%; animation: bounce 1.1s ease-in-out infinite; }
+      .eq rect:nth-child(2) { animation-duration: .8s;  animation-delay: -.2s; }
+      .eq rect:nth-child(3) { animation-duration: 1.3s; animation-delay: -.5s; }
+      .eq rect:nth-child(4) { animation-duration: .9s;  animation-delay: -.1s; }
+      .eq rect:nth-child(5) { animation-duration: 1.2s; animation-delay: -.7s; }
+      .eq rect:nth-child(6) { animation-duration: .7s;  animation-delay: -.4s; }
+      .eq rect:nth-child(7) { animation-duration: 1s;   animation-delay: -.6s; }
+      @keyframes bounce { 0%,100% { transform: scaleY(.25) } 50% { transform: scaleY(1) } }
+      .progress { animation: grow 14s linear infinite; }
+      @keyframes grow { from { width: 4px } to { width: 96px } }
+      .caret { animation: blink 1s steps(1) infinite; }
+      @keyframes blink { 50% { opacity: 0 } }
+      @media (prefers-reduced-motion: reduce) { .eq rect, .progress, .caret { animation: none } }
+    </style>
+  </defs>
+
+  <rect width="1280" height="420" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="420" rx="24" fill="url(#glow)"/>
+
+  <!-- wordmark -->
+  <g transform="translate(72 0)">
+    <g class="eq" transform="translate(0 112)">
+      <rect x="0"  y="0" width="9" height="56" rx="3" fill="#f0abfc"/>
+      <rect x="14" y="0" width="9" height="56" rx="3" fill="#e879f9"/>
+      <rect x="28" y="0" width="9" height="56" rx="3" fill="#c084fc"/>
+      <rect x="42" y="0" width="9" height="56" rx="3" fill="#a78bfa"/>
+      <rect x="56" y="0" width="9" height="56" rx="3" fill="#c084fc"/>
+      <rect x="70" y="0" width="9" height="56" rx="3" fill="#f472b6"/>
+      <rect x="84" y="0" width="9" height="56" rx="3" fill="#fb923c"/>
+    </g>
+    <text x="0" y="238" class="sans" font-size="84" font-weight="800" fill="url(#accent)" letter-spacing="-2">musicflow</text>
+    <text x="2" y="286" class="sans" font-size="26" fill="#e6e1f0" font-weight="500">YouTube music in Claude Code,</text>
+    <text x="2" y="320" class="sans" font-size="26" fill="#e6e1f0" font-weight="500">picked by Claude for your mood.</text>
+    <text x="2" y="364" class="mono" font-size="17" fill="#8b84a3">stations · auto mood · playlists · mpv + yt-dlp</text>
+  </g>
+
+  <!-- terminal -->
+  <g transform="translate(600 70)">
+    <rect width="612" height="282" rx="14" fill="#0b0d14" stroke="#2a2540"/>
+    <circle cx="22" cy="20" r="6" fill="#ff5f57"/>
+    <circle cx="42" cy="20" r="6" fill="#febc2e"/>
+    <circle cx="62" cy="20" r="6" fill="#28c840"/>
+    <text x="306" y="25" class="mono" font-size="13" fill="#5d5875" text-anchor="middle">claude — ~/code/app</text>
+
+    <g class="mono" font-size="15">
+      <text x="24" y="70" fill="#8b84a3">&gt; put on something like Tycho, but more upbeat</text>
+      <text x="24" y="102" fill="#e6e1f0"><tspan fill="#c084fc">●</tspan> Music(station: "like Tycho, more upbeat")</text>
+      <text x="24" y="128" fill="#8b84a3">  ⎿ Station is on; first tracks in a few seconds.</text>
+
+      <line x1="24" y1="164" x2="588" y2="164" stroke="#2a2540"/>
+      <text x="24" y="194" fill="#e6e1f0">❯ <tspan class="caret">▍</tspan></text>
+      <line x1="24" y1="212" x2="588" y2="212" stroke="#2a2540"/>
+
+      <text x="24" y="242" fill="#5d5875">? for shortcuts  ·  <tspan fill="#f0abfc">♪</tspan> <tspan fill="#b9b3cc">ODESZA — Sun Models</tspan></text>
+      <rect x="436" y="236" width="96" height="4" rx="2" fill="#2a2540"/>
+      <rect x="436" y="236" width="40" height="4" rx="2" fill="url(#accent)" class="progress"/>
+      <text x="544" y="242" fill="#5d5875">1:12</text>
+    </g>
+  </g>
+</svg>
