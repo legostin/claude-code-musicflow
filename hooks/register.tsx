@@ -647,7 +647,8 @@ export const register: Register = on => {
     const line = p.current
       ? `♪ ${p.isPaused ? '⏸ ' : ''}${name(p.current)}  ${clock(p.pos)} ${bar(p.pos, p.dur, 8)} ${clock(p.dur)}`
       : `♪ ${busy}`
-    const tail = e.props.tail ? `${e.props.tail} · ${line}` : `  ·  ${line}`
+    // The engine joins its line and the tail with its own separator.
+    const tail = e.props.tail ? `${e.props.tail} · ${line}` : line
     return next({ ...e, props: { ...e.props, tail } })
   })
 

@@ -193,7 +193,7 @@ describe('drawing', () => {
       return <Text>engine</Text>
     })
     const ui = await $.ui.mount({ ...HINT, surface: 'terminal' })
-    expect(tail).toContain('♪ Roygbiv — Boards of Canada')
+    expect(tail?.startsWith('♪ Roygbiv — Boards of Canada')).toBe(true)
     expect(tail).toContain('0:30')
     await ui.unmount()
   })
