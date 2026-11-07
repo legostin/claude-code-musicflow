@@ -212,6 +212,7 @@ describe('drawing', () => {
       const ui = await $.ui.mount({ ...PANE, surface })
       expect(await ui.find({ type: 'Text', text: /Awake/ })).toBeDefined()
       expect(await ui.find({ key: 'p-next' })).toBeDefined()
+      if (surface !== 'mobile') expect(await ui.find({ key: 'play-query' })).toBeDefined()
       await ui.unmount()
     }
   })

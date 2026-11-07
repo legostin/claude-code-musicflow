@@ -649,6 +649,16 @@ export const register: Register = on => {
           />
         </Box>
 
+        {Input && (
+          <Input
+            key="play-query"
+            label="♪ "
+            placeholder="play: artist, track or vibe — e.g. Moby, Tycho Awake, rainy synthwave"
+            submitLabel="play"
+            onSubmit={(v: string) => v.trim() && press($, { do: 'play', query: v.trim() })}
+          />
+        )}
+
         <Box flexDirection="column">
           <Text bold>Now feeding</Text>
           <Text dimColor wrap="truncate-end">

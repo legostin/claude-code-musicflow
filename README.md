@@ -65,7 +65,7 @@ In the desktop app, where `/plugin` doesn't run: click **+** next to the prompt 
 
 With `layout above`, band hotkeys, once the band has focus (`ctrl+x tab` or a click): `p` pause, `n` next, `l` like, `d` dislike, `m` panel.
 
-The panel shows now-playing with progress and the reason for the pick, the controls, the mood picker and a free-text mood field, the next six tracks with the reason for each, your stations with a field for a new one, and your playlists.
+The panel shows now-playing with progress and the reason for the pick, the controls, a field to play anything by query, the mood picker and a free-text mood field, the next six tracks with the reason for each, your stations with a field for a new one, and your playlists.
 
 ## How it works
 
