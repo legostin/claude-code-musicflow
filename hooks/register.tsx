@@ -61,6 +61,7 @@ const S = {
   tick: 0,
   prev: null as { track: Track; pos: number; dur: number } | null,
   signalsDirty: false,
+  metaLoadedAt: 0,
   autoMood: null as { mood: Mood; at: number } | null,
 }
 
@@ -251,7 +252,14 @@ async function start($: $): Promise<string | null> {
 async function poll($: $) {
   if (!S.env) return
   const now = await $.clock.now()
-  const p = await snapshot($, S.env, id => meta.get(id))
+  let p = await snapshot($, S.env, id => meta.get(id))
+  // Another session queued tracks this one has not heard of: read their names now.
+  const unknown = [p.current, ...p.upcoming].some(t => t && !meta.has(t.id))
+  if (unknown && now - S.metaLoadedAt > 3000) {
+    S.metaLoadedAt = now
+    await loadMeta($)
+    p = await snapshot($, S.env, id => meta.get(id))
+  }
 
   // A track changed: what share of the last one was heard is a taste signal.
   if (S.prev && S.prev.track.id !== p.current?.id) {
