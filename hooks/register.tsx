@@ -7,7 +7,7 @@ import { DEFAULT_MOOD, PRESETS, type Signal, WINDOW_MS, autoMood, manualMood, me
 import { checks as doctorChecks, isClean, isReady, plan, report } from './doctor'
 import { type Env, ensure, ipc, mix, resolveEnv, search, snapshot } from './mpv'
 import { hour as localHour, rmf } from './platform'
-import { SYSTEM, buildPrompt, parsePicks, stationName } from './recommend'
+import { SOUNDTRACK_SYSTEM, SYSTEM, buildPrompt, parsePicks, parseSoundtrack, sessionDigest, stationName } from './recommend'
 import { isGood, pick, radioUrl, toTrack, watchUrl } from './search'
 import { blockedIds, describeTaste, dislike, like, normalizeTaste, recordPlay, type Taste } from './taste'
 
@@ -442,6 +442,38 @@ async function generate($: $, reason: 'low' | 'start' = 'low') {
   }
 }
 
+// ------------------------------------------------------------ session soundtrack
+
+/** Claude reads the session and scores it: a station for what is going on right now. */
+async function soundtrack($: $): Promise<string> {
+  await setActivity($, 'reading the session…')
+  try {
+    const messages = await $.session.messages()
+    const now = await $.clock.now()
+    const recent = signals.filter(x => now - x.at <= WINDOW_MS)
+    const cwd = await $.session.cwd()
+    const digest = sessionDigest(messages, {
+      project: cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd,
+      hour: await hour($),
+      fails: recent.filter(x => x.kind === 'bash-fail').length,
+      edits: recent.filter(x => x.kind === 'edit').length,
+    })
+    if (!messages.some(m => m.role === 'user' && m.text.trim())) {
+      return 'Nothing to score yet: the session has no work in it. Try again once you are into a task, or /music play.'
+    }
+    await setActivity($, 'scoring the session…')
+    const reply = await $.model.complete({ model: 'haiku', system: SOUNDTRACK_SYSTEM, prompt: digest, maxTokens: 400, effort: 'low', timeoutMs: 45_000 })
+    const score = reply.isAnswered ? parseSoundtrack(reply.text) : null
+    if (!score) return 'Could not score the session this time; try again in a moment.'
+    const failed = await start($)
+    if (failed) return failed
+    await startStation($, { name: `🎬 ${score.name}`, prompt: score.prompt })
+    return `🎬 ${score.scene ? `${score.scene} → ` : ''}${score.name}: ${score.prompt}`
+  } finally {
+    await setActivity($, null)
+  }
+}
+
 // ------------------------------------------------------------ actions
 
 async function setSource($: $, source: Source) {
@@ -482,6 +514,7 @@ async function act($: $, a: Action): Promise<string> {
     const now = await getMood($)
     return `Mood: ${now.label}${now.mode === 'auto' ? ' (auto)' : ''}. Next picks will follow it.`
   }
+  if (a.do === 'soundtrack') return soundtrack($)
   if (a.do === 'setup') {
     if (a.install) return installAuto($)
     return (await refreshSetup($)).report
@@ -539,6 +572,19 @@ async function act($: $, a: Action): Promise<string> {
       if (p.upcoming.length < LOW_WATER) void generate($)
       await poll($)
       return p.upcoming.length ? `Next: ${name(p.upcoming[0]!)}` : 'Queue was empty; picking more.'
+    }
+    case 'prev': {
+      const p = await read($, player)
+      // As players do: past the first seconds, back to the start of this track.
+      if (p.pos > 5 || !p.current) {
+        await ipc($, e, [['seek', 0, 'absolute']])
+        await poll($)
+        return p.current ? `From the start: ${name(p.current)}` : 'Nothing is playing.'
+      }
+      const r = await ipc($, e, [['playlist-prev', 'weak']])
+      await poll($)
+      const now = await read($, player)
+      return r && r[0] !== undefined && now.current ? `Back to: ${name(now.current)}` : 'This is the first track of the queue.'
     }
     case 'like':
     case 'dislike': {
@@ -638,15 +684,16 @@ export const register: Register = on => {
         'Controls the background music player (YouTube via mpv). Use when the user asks to play, stop, skip, like music, ' +
         'start a station ("play something like Boards of Canada"), or change the mood. ' +
         'Actions: play (value: search query; empty resumes, picks up the saved queue after a restart, or starts "My wave"), station (value: description), ' +
-        'pause, resume, next, like, dislike, mood (value: text or "auto"), volume (value: 0-100), ' +
+        'pause, resume, next, prev (previous track; past 5 s restarts this one), like, dislike, mood (value: text or "auto"), volume (value: 0-100), ' +
         'playlist (value: "save <name>" or "play <name>"), stop, now (what is playing), panel, ' +
+        'soundtrack (reads this session and starts a station that scores what the user is doing; use for "music for what I am doing"), ' +
         'setup (checks mpv, yt-dlp and the rest on this machine and says how to fix it; value "install" runs the steps that need no sudo).',
       inputSchema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['play', 'station', 'pause', 'resume', 'next', 'like', 'dislike', 'mood', 'volume', 'playlist', 'stop', 'now', 'panel', 'setup'],
+            enum: ['play', 'station', 'pause', 'resume', 'next', 'prev', 'like', 'dislike', 'mood', 'volume', 'playlist', 'stop', 'now', 'panel', 'setup', 'soundtrack'],
           },
           value: { type: 'string', description: 'The argument of the action, when it takes one.' },
         },
@@ -750,6 +797,9 @@ export const register: Register = on => {
           </Text>
         )}
         {p.current && (
+          <Button key="prev" plain hotkey="b" label="⏮" onPress={() => press($, { do: 'prev' })} />
+        )}
+        {p.current && (
           <Button key="toggle" plain hotkey="p" label={p.isPaused ? '▶' : '⏸'} onPress={() => press($, { do: 'toggle' })} />
         )}
         <Button key="next" plain hotkey="n" label="⏭" onPress={() => press($, { do: 'next' })} />
@@ -757,6 +807,7 @@ export const register: Register = on => {
           <Button key="like" plain hotkey="l" label={isLiked ? '♥' : '♡'} onPress={() => press($, { do: 'like' })} />
         )}
         {p.current && <Button key="dislike" plain hotkey="d" label="✕" onPress={() => press($, { do: 'dislike' })} />}
+        <Button key="soundtrack" plain hotkey="s" label="🎬" onPress={() => press($, { do: 'soundtrack' })} />
         <Button key="panel" plain hotkey="m" label="≡" onPress={() => press($, { do: 'panel' })} />
       </Box>
     )
@@ -822,10 +873,11 @@ export const register: Register = on => {
         </Box>
 
         <Box flexDirection="row" gap={1} flexWrap="wrap">
-          <Button key="p-play" variant="primary" label={p.current && !p.isPaused ? 'Pause' : 'Play'} onPress={() => press($, p.current ? { do: 'toggle' } : { do: 'play', query: '' })} />
-          <Button key="p-next" label="Next" onPress={() => press($, { do: 'next' })} />
-          <Button key="p-like" label={isLiked ? '♥ Liked' : '♡ Like'} onPress={() => press($, { do: 'like' })} />
-          <Button key="p-dislike" label="✕ Dislike" onPress={() => press($, { do: 'dislike' })} />
+          <Button key="p-prev" hotkey="b" label="⏮ Prev" onPress={() => press($, { do: 'prev' })} />
+          <Button key="p-play" hotkey="p" variant="primary" label={p.current && !p.isPaused ? '⏸ Pause' : '▶ Play'} onPress={() => press($, p.current ? { do: 'toggle' } : { do: 'play', query: '' })} />
+          <Button key="p-next" hotkey="n" label="Next ⏭" onPress={() => press($, { do: 'next' })} />
+          <Button key="p-like" hotkey="l" label={isLiked ? '♥ Liked' : '♡ Like'} onPress={() => press($, { do: 'like' })} />
+          <Button key="p-dislike" hotkey="d" label="✕ Dislike" onPress={() => press($, { do: 'dislike' })} />
           <Button key="p-voldown" label="−" onPress={() => press($, { do: 'volume', value: Math.max(0, p.volume - 10) })} />
           <Text dimColor>{p.isRunning ? `vol ${p.volume}` : ''}</Text>
           <Button key="p-volup" label="+" onPress={() => press($, { do: 'volume', value: Math.min(130, p.volume + 10) })} />
@@ -847,6 +899,14 @@ export const register: Register = on => {
             onSubmit={(v: string) => v.trim() && press($, { do: 'play', query: v.trim() })}
           />
         )}
+
+        <Button
+          key="soundtrack"
+          hotkey="s"
+          variant="primary"
+          label="🎬 Soundtrack this session"
+          onPress={() => press($, { do: 'soundtrack' })}
+        />
 
         <Box flexDirection="column">
           <Text bold>Now feeding</Text>

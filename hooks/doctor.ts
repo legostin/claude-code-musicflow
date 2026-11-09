@@ -18,6 +18,8 @@ export type Probe = {
   deno: Tool | null
   node: Tool | null
   ipc: IpcTool | null
+  /** Linux: mpv's MPRIS script, which hands the ⏯ ⏮ ⏭ keys to mpv. Elsewhere mpv has it built in. */
+  mediaKeys?: boolean
   /** Package managers found on PATH. */
   managers: {
     brew?: boolean
@@ -33,7 +35,7 @@ export type Probe = {
   today: string
 }
 
-export type CheckKey = 'mpv' | 'yt-dlp' | 'js' | 'ipc'
+export type CheckKey = 'mpv' | 'yt-dlp' | 'js' | 'ipc' | 'keys'
 export type Check = { key: CheckKey; level: 'ok' | 'warn' | 'missing'; label: string; detail: string }
 
 /**
@@ -109,11 +111,19 @@ export function checks(p: Probe): Check[] {
           detail: p.os === 'windows' ? 'PowerShell not found' : 'no nc with -U, socat or python3 to talk to mpv',
         },
   )
+  if (p.os === 'linux') {
+    out.push(
+      p.mediaKeys
+        ? { key: 'keys', level: 'ok', label: 'media keys', detail: 'mpv-mpris' }
+        : { key: 'keys', level: 'warn', label: 'media keys', detail: 'optional: mpv-mpris lets ⏯ ⏮ ⏭ keys control the music' },
+    )
+  }
   return out
 }
 
 export const isReady = (cs: readonly Check[]) => cs.every(c => c.level !== 'missing')
-export const isClean = (cs: readonly Check[]) => cs.every(c => c.level === 'ok')
+/** Nothing to fix. Media keys on Linux are a nicety and do not count. */
+export const isClean = (cs: readonly Check[]) => cs.every(c => c.level === 'ok' || c.key === 'keys')
 
 const sh = (script: string) => ['/bin/sh', '-c', script]
 
@@ -206,6 +216,7 @@ export function plan(p: Probe): Step[] {
       need('ipc') && (p.managers.apt ? 'netcat-openbsd' : 'socat'),
       // deno's installer unpacks a zip.
       need('js') && 'unzip',
+      need('keys') && (p.managers.zypper ? 'mpv-plugin-mpris' : 'mpv-mpris'),
     ].filter(Boolean) as string[]
     if (pkgs.length) {
       steps.push(

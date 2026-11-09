@@ -38,6 +38,8 @@ You open YouTube for "music to code to", lose ten minutes picking, and an ad bre
 | 🎛 **Claude is the DJ** | Haiku reads the station description, your mood, and what you liked, skipped and finished, then picks the next tracks. Every pick shows *why* it was chosen. |
 | 📻 **Stations from a sentence** | `/music station like Boards of Canada, but more upbeat` gives an endless stream. `/music play Moby` plays the best match now and keeps going with similar music. |
 | 🧠 **Mood that follows your session** | `auto` reads the session: failing commands make it calmer, a burst of edits makes it more energetic, late at night it gets quiet. Or set it in your own words: `rainy evening, no vocals`. |
+| 🎬 **Soundtrack this session** | One button (or `/music soundtrack`): Claude reads what you're doing right now (the task, the files, the failing tests, the hour) and scores it like a film scene. *"Stalled race-condition hunt at night"* becomes calm ambient at 70–85 BPM, no vocals. |
+| ⌨️ **Media keys** | ⏯ ⏮ ⏭ on your keyboard, headphones and the system's Now Playing control the music, even when the terminal isn't focused. |
 | 💬 **Talk to it** | Claude gets a `Music` tool, so "put on something epic" or "stop the music" in the chat just works. |
 | ♥ **Learns as you listen** | ♥ and ✕ are strong signals. Skipping early is a weak minus, and listening to the end is a weak plus. Likes collect in a *Liked* playlist. |
 | 🪟 **Out of the way** | One dim line under the prompt shows what's playing. `/music` opens the full panel at the side: controls, a play-anything field, mood, the queue with reasons, stations and playlists. |
@@ -81,7 +83,8 @@ Just ask Claude: *"play something like Tycho"*, *"more energetic"*, *"skip this"
 | `/music` | open the panel |
 | `/music play [query]` | play now and keep going with similar music; with no query, resume or start *My wave* |
 | `/music station <description>` | an endless station from a description |
-| `/music next` · `like` · `dislike` | skip, ♥, ✕ (✕ also skips, and the track never comes back) |
+| `/music soundtrack` | Claude reads this session and starts a station that scores it |
+| `/music next` · `prev` · `like` · `dislike` | skip, back (past 5 s: restart the track), ♥, ✕ (✕ also skips, and the track never comes back) |
 | `/music pause` · `resume` · `stop` · `now` | control and status |
 | `/music mood <text\|auto>` | set the mood, or follow the session |
 | `/music vol <0-100>` | volume |
@@ -89,7 +92,13 @@ Just ask Claude: *"play something like Tycho"*, *"more energetic"*, *"skip this"
 | `/music layout below\|above` | now-playing under the prompt (text, default) or in a band above it, with buttons |
 | `/music setup [install]` | check mpv, yt-dlp and the rest on this machine; install what is missing |
 
-With `layout above`, the band has hotkeys once it has focus (`ctrl+x tab` or a click): `p` pause, `n` next, `l` like, `d` dislike, `m` panel.
+### Keyboard
+
+- **Media keys** ⏯ ⏮ ⏭ work everywhere, focused or not: on macOS and Windows mpv joins the system's Now Playing by itself. On Linux it needs the `mpv-mpris` package, and `/music setup` offers it.
+- **In the panel** (click it, or open it with `/music`): `p` play/pause, `n` next, `b` back, `l` like, `d` dislike, `s` soundtrack this session.
+- **The band above the prompt** (`/music layout above`, focus it with `ctrl+x tab`): the same keys, and `m` opens the panel.
+
+Claude Code doesn't let a mod bind global shortcuts of its own, which is why the media keys go through mpv and the system.
 
 ## How it works
 

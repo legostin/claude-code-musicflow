@@ -2,10 +2,10 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Player } from '../types'
 import { parseCommand, parseToolInput } from '../hooks/commands'
-import { type Probe, checks, isReady, jsRuntime, plan, report, ytdlpAgeDays } from '../hooks/doctor'
+import { type Probe, checks, isClean, isReady, jsRuntime, plan, report, ytdlpAgeDays } from '../hooks/doctor'
 import { mpvArgs } from '../hooks/mpv'
 import { autoLabel, manualMood, mergeSignals, parseSignals } from '../hooks/mood'
-import { buildPrompt, parsePicks, stationName } from '../hooks/recommend'
+import { buildPrompt, parsePicks, parseSoundtrack, sessionDigest, stationName } from '../hooks/recommend'
 import { isGood, parseHits, pick, videoId } from '../hooks/search'
 import { EMPTY_TASTE, blockedIds, describeTaste, dislike, like, recordPlay } from '../hooks/taste'
 
@@ -77,11 +77,28 @@ describe('setup doctor', () => {
   test('Linux: sudo steps are pasted, yt-dlp and deno install without sudo', () => {
     const p: Probe = { ...BASE, os: 'linux', arch: 'x64', mpv: null, ytdlp: null, deno: null, ipc: null, managers: { apt: true } }
     const steps = plan(p)
-    expect(steps[0]?.paste).toBe('sudo apt-get install -y mpv netcat-openbsd unzip')
+    expect(steps[0]?.paste).toBe('sudo apt-get install -y mpv netcat-openbsd unzip mpv-mpris')
     expect(steps[1]?.argv?.[2]).toContain('releases/latest/download/yt-dlp_linux')
     expect(steps[2]?.argv?.[2]).toContain('deno.land/install.sh')
     const arm = plan({ ...p, arch: 'arm64' })
     expect(arm[1]?.argv?.[2]).toContain('yt-dlp_linux_aarch64')
+  })
+
+  test('Linux media keys are optional: they never block, and they never alone show the setup block', () => {
+    const p: Probe = { ...BASE, os: 'linux', arch: 'x64', managers: { pacman: true }, mediaKeys: false }
+    const cs = checks(p)
+    expect(cs.find(c => c.key === 'keys')?.level).toBe('warn')
+    expect(isReady(cs)).toBe(true)
+    expect(isClean(cs)).toBe(true)
+    expect(plan(p)[0]?.paste).toBe('sudo pacman -S --needed --noconfirm mpv-mpris')
+    expect(checks({ ...p, mediaKeys: true }).find(c => c.key === 'keys')?.level).toBe('ok')
+    expect(checks(BASE).some(c => c.key === 'keys')).toBe(false)
+  })
+
+  test('/music prev parses', () => {
+    expect(parseCommand('prev')).toEqual({ do: 'prev' })
+    expect(parseCommand('back')).toEqual({ do: 'prev' })
+    expect(parseToolInput({ action: 'prev' })).toEqual({ do: 'prev' })
   })
 
   test('Windows: winget ids', () => {
@@ -150,6 +167,37 @@ describe('recommend', () => {
     expect(prompt).toContain('dark ambient')
     expect(prompt).toContain('calm debugging')
     expect(prompt).toContain('Give 8 picks.')
+  })
+
+  test('the session digest keeps the work and drops the music tool', () => {
+    const digest = sessionDigest(
+      [
+        { role: 'user', text: 'fix the flaky auth test' },
+        {
+          role: 'assistant',
+          text: 'Looking at it.',
+          toolUses: [
+            { tool: 'Bash', input: { command: 'npm test -- auth' } },
+            { tool: 'Edit', input: { file_path: 'src/auth/session.ts' } },
+            { tool: 'mcp__musicflow__Music', input: { action: 'now' } },
+          ],
+        },
+      ],
+      { project: 'app', hour: 2, fails: 3, edits: 1 },
+    )
+    expect(digest).toContain('DEV: fix the flaky auth test')
+    expect(digest).toContain('[Bash: npm test -- auth]')
+    expect(digest).toContain('[Edit: src/auth/session.ts]')
+    expect(digest).toContain('Local hour: 2:00')
+    expect(digest).not.toContain('musicflow')
+  })
+
+  test('a soundtrack reply is read, fences and all', () => {
+    const r = parseSoundtrack('```json\n{"scene":"ночной дебаг авторизации","name":"Night Shift","prompt":"tense dark synthwave, slow build, no vocals — Perturbator, Carpenter Brut"}\n```')
+    expect(r).toEqual({ scene: 'ночной дебаг авторизации', name: 'Night Shift', prompt: 'tense dark synthwave, slow build, no vocals — Perturbator, Carpenter Brut' })
+    expect(parseSoundtrack('{"name":"x"}')).toBe(null)
+    expect(parseCommand('soundtrack')).toEqual({ do: 'soundtrack' })
+    expect(parseToolInput({ action: 'soundtrack' })).toEqual({ do: 'soundtrack' })
   })
 
   test('station names are short', () => {

@@ -153,5 +153,15 @@ export async function probe($: $, h: Host): Promise<Probe> {
           }
   const now = new Date(await $.clock.now())
   const today = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
-  return { os: h.os, arch: h.arch, home: h.home, mpv, ytdlp, deno, node, ipc, managers, today }
+  const mediaKeys =
+    h.os === 'linux'
+      ? (
+          await Promise.all(
+            ['/etc/mpv/scripts/mpris.so', '/usr/lib/mpv-mpris/mpris.so', '/usr/share/mpv/scripts/mpris.so', `${h.home}/.config/mpv/scripts/mpris.so`].map(f =>
+              $.fs.exists(f).catch(() => false),
+            ),
+          )
+        ).some(Boolean)
+      : undefined
+  return { os: h.os, arch: h.arch, home: h.home, mpv, ytdlp, deno, node, ipc, mediaKeys, managers, today }
 }

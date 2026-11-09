@@ -7,6 +7,7 @@ export type Action =
   | { do: 'resume' }
   | { do: 'toggle' }
   | { do: 'next' }
+  | { do: 'prev' }
   | { do: 'like' }
   | { do: 'dislike' }
   | { do: 'mood'; text: string }
@@ -17,13 +18,15 @@ export type Action =
   | { do: 'layout'; where: 'below' | 'above' }
   | { do: 'now' }
   | { do: 'setup'; install: boolean }
+  | { do: 'soundtrack' }
   | { do: 'help' }
 
 export const HELP = [
   '/music — open the panel',
   '/music play [query] — play a track now and keep going with similar music (no query: your own station)',
   '/music station <description> — endless station, e.g. "like Boards of Canada but more upbeat"',
-  '/music pause | resume | next | like | dislike | stop | now',
+  '/music soundtrack — Claude reads this session and scores it: a station for what you are doing right now',
+  '/music pause | resume | next | prev | like | dislike | stop | now',
   '/music mood <text|auto> — e.g. "calm focus", or auto to follow the session',
   '/music vol <0-100>',
   '/music playlist save <name> | playlist play <name>',
@@ -54,6 +57,10 @@ export function parseCommand(args: string): Action | { error: string } {
     case 'next':
     case 'skip':
       return { do: 'next' }
+    case 'prev':
+    case 'previous':
+    case 'back':
+      return { do: 'prev' }
     case 'like':
       return { do: 'like' }
     case 'dislike':
@@ -82,6 +89,9 @@ export function parseCommand(args: string): Action | { error: string } {
     }
     case 'now':
       return { do: 'now' }
+    case 'soundtrack':
+    case 'score':
+      return { do: 'soundtrack' }
     case 'setup':
     case 'doctor':
       return { do: 'setup', install: (rest[0] ?? '').toLowerCase() === 'install' }
