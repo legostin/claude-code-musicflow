@@ -1,10 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Layout, Library, Mood, Player, Playlist, Source, Station, Track } from '../types'
+import type { Layout, Library, Mood, Player, Playlist, SetupView, Source, Station, Track } from '../types'
 import { type Action, HELP, parseCommand, parseToolInput, type ToolInput } from './commands'
 import { DEFAULT_MOOD, PRESETS, type Signal, WINDOW_MS, autoMood, manualMood, mergeSignals, normalizeMood, parseSignals } from './mood'
+import { checks as doctorChecks, isClean, isReady, plan, report } from './doctor'
 import { type Env, ensure, ipc, mix, resolveEnv, search, snapshot } from './mpv'
+import { hour as localHour, rmf } from './platform'
 import { SYSTEM, buildPrompt, parsePicks, stationName } from './recommend'
 import { isGood, pick, radioUrl, toTrack, watchUrl } from './search'
 import { blockedIds, describeTaste, dislike, like, normalizeTaste, recordPlay, type Taste } from './taste'
@@ -28,6 +30,7 @@ const EMPTY_LIBRARY: Library = { source: { kind: 'none' }, stations: [], playlis
 const player = atom({ plugin: 'musicflow', key: 'player' } as const, IDLE_PLAYER)
 const library = atom({ plugin: 'musicflow', key: 'library' } as const, EMPTY_LIBRARY)
 const activity = atom({ plugin: 'musicflow', key: 'activity' } as const, null as string | null)
+const setup = atom({ plugin: 'musicflow', key: 'setup' } as const, null as SetupView | null)
 
 // ---------------------------------------------------------------- formatting
 
@@ -103,9 +106,7 @@ async function getMood($: $): Promise<Mood> {
 }
 
 async function hour($: $) {
-  const r = await $.process.run(['date', '+%H']).catch(() => null)
-  const h = Number(r?.stdout.trim())
-  return Number.isFinite(h) ? h : 12
+  return S.env ? localHour($, S.env.host) : new Date().getHours()
 }
 
 function signalsDir() {
@@ -125,7 +126,7 @@ async function allSignals($: $, now: number): Promise<Signal[]> {
     const path = `${signalsDir()}/${f.name}`
     // A file nobody touched for a whole window holds nothing that counts.
     if (f.mtimeMs && now - f.mtimeMs > WINDOW_MS) {
-      await $.process.run(['rm', '-f', path]).catch(() => undefined)
+      await rmf($, S.env.host, path)
       continue
     }
     lists.push(parseSignals((await $.fs.read(path).catch(() => '[]')) as unknown as string))
@@ -237,9 +238,67 @@ function releaseGenLock($: $) {
 // ------------------------------------------------------------ player
 
 function missing() {
-  return !S.env?.mpv || !S.env?.ytdlp
-    ? `musicflow needs ${[!S.env?.mpv && 'mpv', !S.env?.ytdlp && 'yt-dlp'].filter(Boolean).join(' and ')}: brew install mpv yt-dlp`
-    : null
+  const gone = [!S.env?.mpv && 'mpv', !S.env?.ytdlp && 'yt-dlp', !S.env?.ipcTool && 'a way to talk to mpv'].filter(Boolean)
+  return gone.length ? `musicflow needs ${gone.join(', ')}. Run /music setup: it checks this machine and installs what it can.` : null
+}
+
+// ------------------------------------------------------------ setup
+
+/** Looks at the machine again and shows what is missing. */
+async function refreshSetup($: $, reprobe = true): Promise<SetupView> {
+  if (!S.env || reprobe) S.env = await resolveEnv($)
+  const pr = S.env.probe
+  const cs = doctorChecks(pr)
+  const steps = plan(pr)
+  const view: SetupView = {
+    os: `${pr.os} ${pr.arch}`,
+    checks: cs,
+    steps: steps.map(s => ({
+      id: s.id,
+      title: s.title,
+      kind: s.argv ? 'auto' : s.paste ? 'paste' : 'manual',
+      text: s.paste ?? s.manual ?? '',
+    })),
+    report: report(pr, cs, steps),
+    isReady: isReady(cs),
+    isClean: isClean(cs),
+  }
+  await update($, setup, () => view)
+  return view
+}
+
+/** Runs every step the mod can run by itself (no sudo), one after another. */
+async function installAuto($: $): Promise<string> {
+  if (!S.env) S.env = await resolveEnv($)
+  const steps = plan(S.env.probe).filter(s => s.argv)
+  if (!steps.length) return (await refreshSetup($)).report
+  const lines: string[] = []
+  for (const s of steps) {
+    await setActivity($, `setup: ${s.title}…`)
+    const r = await $.process.run(s.argv!, { timeoutMs: 600_000 }).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+    const tail = `${r.stderr}\n${r.stdout}`.trim().split(/\r?\n/).slice(-2).join(' ').slice(0, 200)
+    lines.push(r.exitCode === 0 ? `✓ ${s.title}` : `✗ ${s.title} (exit ${r.exitCode}${tail ? `: ${tail}` : ''})`)
+  }
+  await setActivity($, null)
+  const view = await refreshSetup($)
+  return `${lines.join('\n')}\n\n${view.report}`
+}
+
+/** Puts a step that needs sudo into the prompt, as a `!` command for the person to run. */
+async function pasteStep($: $, line: string) {
+  await $.prompt.fill({ text: `! ${line}`, mode: 'replace' })
+}
+
+/** Hands the whole setup to Claude: it can run commands and ask for what needs a person. */
+async function askClaude($: $) {
+  const view = (await read($, setup)) ?? (await refreshSetup($))
+  await $.prompt.submit({
+    text:
+      'Set up musicflow (the music mod) on this machine. Here is its check:\n\n' +
+      view.report +
+      '\n\nInstall what is missing with the steps above (or better ones for this system), ' +
+      'ask me before anything that needs sudo or admin, then run /music setup to confirm.',
+  })
 }
 
 async function start($: $): Promise<string | null> {
@@ -423,6 +482,10 @@ async function act($: $, a: Action): Promise<string> {
     const now = await getMood($)
     return `Mood: ${now.label}${now.mode === 'auto' ? ' (auto)' : ''}. Next picks will follow it.`
   }
+  if (a.do === 'setup') {
+    if (a.install) return installAuto($)
+    return (await refreshSetup($)).report
+  }
   if (a.do === 'layout') {
     await $.store.set('layout', a.where)
     await refreshLibrary($)
@@ -542,11 +605,19 @@ async function act($: $, a: Action): Promise<string> {
 function press($: $, a: Action) {
   void act($, a)
     .then(text => {
-      if (a.do !== 'toggle' && a.do !== 'pause' && a.do !== 'resume' && a.do !== 'panel') $.ui.toast(text)
+      if (a.do === 'setup') $.ui.toast(text.split('\n').find(l => l.startsWith('✗')) ?? (text.includes('All set') ? 'musicflow: all set.' : 'musicflow: setup checked; see the panel.'))
+      else if (a.do !== 'toggle' && a.do !== 'pause' && a.do !== 'resume' && a.do !== 'panel') $.ui.toast(text)
     })
     .catch(err => $.ui.toast(`musicflow: ${String(err)}`))
 }
 
+
+/** Answers Claude's calls of the Music tool. */
+async function serveTool($: $, e: unknown): Promise<{ result: string }> {
+  const a = parseToolInput(e as ToolInput)
+  if ('error' in a) return { result: `Error: ${a.error}` }
+  return { result: await act($, a) }
+}
 
 export const register: Register = on => {
   // ------------------------------------------------------------ events
@@ -555,6 +626,7 @@ export const register: Register = on => {
     const started = await next(e)
     S.env = await resolveEnv($)
     S.me = await $.session.id()
+    void refreshSetup($, false)
     await $.command.register({
       name: 'music',
       description: 'musicflow: YouTube music picked by Claude for your mood (panel, play, station, mood…)',
@@ -567,13 +639,14 @@ export const register: Register = on => {
         'start a station ("play something like Boards of Canada"), or change the mood. ' +
         'Actions: play (value: search query; empty resumes, picks up the saved queue after a restart, or starts "My wave"), station (value: description), ' +
         'pause, resume, next, like, dislike, mood (value: text or "auto"), volume (value: 0-100), ' +
-        'playlist (value: "save <name>" or "play <name>"), stop, now (what is playing), panel.',
+        'playlist (value: "save <name>" or "play <name>"), stop, now (what is playing), panel, ' +
+        'setup (checks mpv, yt-dlp and the rest on this machine and says how to fix it; value "install" runs the steps that need no sudo).',
       inputSchema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['play', 'station', 'pause', 'resume', 'next', 'like', 'dislike', 'mood', 'volume', 'playlist', 'stop', 'now', 'panel'],
+            enum: ['play', 'station', 'pause', 'resume', 'next', 'like', 'dislike', 'mood', 'volume', 'playlist', 'stop', 'now', 'panel', 'setup'],
           },
           value: { type: 'string', description: 'The argument of the action, when it takes one.' },
         },
@@ -621,6 +694,8 @@ export const register: Register = on => {
 
   // Session signals for the auto mood.
   on('tool.call', async ($, e, next) => {
+    // The Music tool is answered here; a matcher on its name sends tsc into a loop.
+    if (String(e.tool) === TOOL) return serveTool($, e)
     const ran = await next(e)
     const tool = String(e.tool)
     const at = await $.clock.now()
@@ -637,11 +712,6 @@ export const register: Register = on => {
     return { text: await act($, a) }
   })
 
-  on('tool.call', { tool: TOOL }, async ($, e) => {
-    const a = parseToolInput(e as unknown as ToolInput)
-    if ('error' in a) return { result: `Error: ${a.error}` }
-    return { result: await act($, a) }
-  })
 
   // ------------------------------------------------------------ drawing
 
@@ -704,9 +774,37 @@ export const register: Register = on => {
     const width = Math.max(10, Math.min(40, (e.props.bodyColumns ?? 40) - 14))
     const isLiked = p.current ? lib.likedIds.includes(p.current.id) : false
     const moodValue = lib.mood.mode === 'auto' ? 'auto' : PRESETS[lib.mood.label] ? lib.mood.label : 'custom'
+    const su = await read($, setup)
+    const autoSteps = su ? su.steps.filter(s => s.kind === 'auto').length : 0
 
     return (
       <Box flexDirection="column" gap={1}>
+        {su && !su.isClean && (
+          <Box flexDirection="column" borderStyle="round" borderColor={su.isReady ? 'yellow' : 'red'} paddingX={1}>
+            <Text bold>Setup · {su.os}</Text>
+            {su.checks.map(c => (
+              <Text wrap="truncate-end" dimColor={c.level === 'ok'}>
+                <Text color={c.level === 'ok' ? 'green' : c.level === 'warn' ? 'yellow' : 'red'}>
+                  {c.level === 'ok' ? '✓' : c.level === 'warn' ? '!' : '✗'}
+                </Text>{' '}
+                {c.label}: {c.detail}
+              </Text>
+            ))}
+            {su.steps.filter(s => s.kind === 'manual').map(s => (
+              <Text dimColor>• {s.title}: {s.text}</Text>
+            ))}
+            <Box flexDirection="row" gap={1} flexWrap="wrap">
+              {autoSteps > 0 && (
+                <Button key="su-install" variant="primary" label={`Install (${autoSteps})`} onPress={() => press($, { do: 'setup', install: true })} />
+              )}
+              {su.steps.filter(s => s.kind === 'paste').map(s => (
+                <Button key={`su-paste-${s.id}`} label="Put the sudo step in the prompt" onPress={() => void pasteStep($, s.text)} />
+              ))}
+              <Button key="su-claude" label="Ask Claude to set it up" onPress={() => void askClaude($)} />
+              <Button key="su-recheck" dimColor label="Check again" onPress={() => press($, { do: 'setup', install: false })} />
+            </Box>
+          </Box>
+        )}
         <Box flexDirection="column">
           {p.current ? (
             <>

@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-c084fc"></a>
   <img alt="Claude Code mod" src="https://img.shields.io/badge/Claude%20Code-mod-d97757">
-  <img alt="macOS · Linux" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-supported-8b84a3">
+  <img alt="macOS · Linux · Windows" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-supported-8b84a3">
   <img alt="mpv + yt-dlp" src="https://img.shields.io/badge/mpv%20%2B%20yt--dlp-powered-f0abfc">
 </p>
 
@@ -46,13 +46,7 @@ You open YouTube for "music to code to", lose ten minutes picking, and an ad bre
 
 ## Install
 
-You need `mpv` and a **recent** `yt-dlp`:
-
-```sh
-brew install mpv yt-dlp        # macOS; on Linux use your package manager
-```
-
-Then, at the prompt of a Claude Code terminal session:
+At the prompt of a Claude Code terminal session:
 
 ```
 /plugin install musicflow --marketplace legostin/claude-code-musicflow
@@ -65,6 +59,18 @@ claude plugin install musicflow --marketplace legostin/claude-code-musicflow
 ```
 
 In the desktop app, where `/plugin` doesn't run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `legostin/claude-code-musicflow`, then **Add plugin**.
+
+### Setup: `/music setup`
+
+musicflow needs [`mpv`](https://mpv.io) (plays the audio), a **recent** [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) (finds and streams the tracks) and a JS runtime for yt-dlp ([deno](https://deno.com), or node 20+). Run `/music setup` and it checks all of that on your machine, then fixes what it can:
+
+| | What `/music setup install` (or **Install** in the panel) does |
+| --- | --- |
+| **macOS** | `brew install mpv yt-dlp deno`, `brew upgrade yt-dlp` when it's old. No Homebrew: the official yt-dlp binary and deno go into your home folder; mpv from [brew.sh](https://brew.sh) or mpv.app. |
+| **Linux** | The official yt-dlp binary into `~/.local/bin` (distribution packages lag behind YouTube) and deno into `~/.deno`, no sudo. `mpv` comes from your package manager: the panel puts the `sudo apt-get install …` (dnf, pacman, zypper, apk) line into the prompt for you to run. |
+| **Windows** | `winget install shinchiro.mpv yt-dlp.yt-dlp DenoLand.Deno` (or scoop). The player link uses a named pipe through PowerShell. |
+
+Or press **Ask Claude to set it up** in the panel: Claude gets the check and installs the rest, asking you before anything that needs sudo.
 
 ## Use
 
@@ -81,6 +87,7 @@ Just ask Claude: *"play something like Tycho"*, *"more energetic"*, *"skip this"
 | `/music vol <0-100>` | volume |
 | `/music playlist save <name>` · `playlist play <name>` | playlists |
 | `/music layout below\|above` | now-playing under the prompt (text, default) or in a band above it, with buttons |
+| `/music setup [install]` | check mpv, yt-dlp and the rest on this machine; install what is missing |
 
 With `layout above`, the band has hotkeys once it has focus (`ctrl+x tab` or a click): `p` pause, `n` next, `l` like, `d` dislike, `m` panel.
 
@@ -110,7 +117,7 @@ flowchart LR
 <details>
 <summary><b>Tracks stopped playing / "found nothing to play"</b></summary>
 
-YouTube changes its player often, and an old `yt-dlp` stops getting audio. Update it: `brew upgrade yt-dlp` (or `pipx upgrade yt-dlp`).
+YouTube changes its player often, and an old `yt-dlp` stops getting audio. Run `/music setup`: it warns when yt-dlp is more than 60 days old and updates it.
 </details>
 
 <details>
@@ -128,7 +135,7 @@ They share one player. Pause in any window pauses the music. Only one window (th
 <details>
 <summary><b>Windows?</b></summary>
 
-Not yet: the player talks to `mpv` over a Unix socket with `nc -U`. PRs welcome.
+Yes, since 0.4: mpv listens on a named pipe and the mod talks to it through PowerShell; `/music setup` installs mpv, yt-dlp and deno with winget or scoop. It is newer than the macOS and Linux paths: if something is off, please open an issue with the output of `/music setup`.
 </details>
 
 <details>

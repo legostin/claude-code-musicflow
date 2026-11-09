@@ -2,6 +2,8 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Player } from '../types'
 import { parseCommand, parseToolInput } from '../hooks/commands'
+import { type Probe, checks, isReady, jsRuntime, plan, report, ytdlpAgeDays } from '../hooks/doctor'
+import { mpvArgs } from '../hooks/mpv'
 import { autoLabel, manualMood, mergeSignals, parseSignals } from '../hooks/mood'
 import { buildPrompt, parsePicks, stationName } from '../hooks/recommend'
 import { isGood, parseHits, pick, videoId } from '../hooks/search'
@@ -29,6 +31,77 @@ describe('commands', () => {
     expect(parseToolInput({ action: 'station', value: 'lofi' })).toEqual({ do: 'station', prompt: 'lofi' })
     expect(parseToolInput({ action: 'next' })).toEqual({ do: 'next' })
     expect('error' in parseToolInput({})).toBe(true)
+  })
+})
+
+const BASE: Probe = {
+  os: 'macos',
+  arch: 'arm64',
+  home: '/Users/me',
+  mpv: { path: '/opt/homebrew/bin/mpv', version: '0.41.0' },
+  ytdlp: { path: '/opt/homebrew/bin/yt-dlp', version: '2026.10.26' },
+  deno: { path: '/opt/homebrew/bin/deno', version: '2.9.8' },
+  node: null,
+  ipc: 'nc',
+  managers: { brew: true },
+  today: '2026-11-09',
+}
+
+describe('setup doctor', () => {
+  test('a complete machine is all set', () => {
+    const cs = checks(BASE)
+    expect(cs.every(c => c.level === 'ok')).toBe(true)
+    expect(plan(BASE)).toEqual([])
+    expect(report(BASE, cs, [])).toContain('All set')
+  })
+
+  test('yt-dlp age comes from its date version', () => {
+    expect(ytdlpAgeDays('2026.10.26', '2026-11-09')).toBe(14)
+    expect(ytdlpAgeDays('2026.02.04', '2026-11-09')).toBe(278)
+    expect(ytdlpAgeDays('nightly', '2026-11-09')).toBe(null)
+  })
+
+  test('the JS runtime: deno first, node 20+ next, else none', () => {
+    expect(jsRuntime(BASE)).toBe('deno:/opt/homebrew/bin/deno')
+    expect(jsRuntime({ deno: null, node: { path: '/usr/bin/node', version: 'v22.3.0' } })).toBe('node:/usr/bin/node')
+    expect(jsRuntime({ deno: null, node: { path: '/usr/bin/node', version: 'v18.19.0' } })).toBe(null)
+  })
+
+  test('macOS with brew: one brew install, and an upgrade for an old yt-dlp', () => {
+    const p: Probe = { ...BASE, mpv: null, deno: null, ytdlp: { path: '/opt/homebrew/bin/yt-dlp', version: '2026.02.04' } }
+    const steps = plan(p)
+    expect(steps.map(s => s.argv?.join(' '))).toEqual(['brew install mpv deno', 'brew upgrade yt-dlp'])
+    expect(isReady(checks(p))).toBe(false)
+  })
+
+  test('Linux: sudo steps are pasted, yt-dlp and deno install without sudo', () => {
+    const p: Probe = { ...BASE, os: 'linux', arch: 'x64', mpv: null, ytdlp: null, deno: null, ipc: null, managers: { apt: true } }
+    const steps = plan(p)
+    expect(steps[0]?.paste).toBe('sudo apt-get install -y mpv netcat-openbsd unzip')
+    expect(steps[1]?.argv?.[2]).toContain('releases/latest/download/yt-dlp_linux')
+    expect(steps[2]?.argv?.[2]).toContain('deno.land/install.sh')
+    const arm = plan({ ...p, arch: 'arm64' })
+    expect(arm[1]?.argv?.[2]).toContain('yt-dlp_linux_aarch64')
+  })
+
+  test('Windows: winget ids', () => {
+    const p: Probe = { ...BASE, os: 'windows', arch: 'x64', mpv: null, ytdlp: null, deno: null, ipc: 'powershell', managers: { winget: true } }
+    expect(plan(p).map(s => s.argv?.[3])).toEqual(['shinchiro.mpv', 'yt-dlp.yt-dlp', 'DenoLand.Deno'])
+    const none = plan({ ...p, managers: {} })
+    expect(none[0]?.manual).toContain('winget')
+  })
+
+  test('mpv is told which JS runtime yt-dlp should use', () => {
+    const args = mpvArgs({ sock: '/s', ytdlp: '/y', js: 'deno:/d' })
+    expect(args).toContain('--ytdl-raw-options-append=js-runtimes=deno:/d')
+    expect(args).toContain('--input-ipc-server=/s')
+    expect(mpvArgs({ sock: '/s', ytdlp: '/y', js: null }).some(a => a.includes('js-runtimes'))).toBe(false)
+  })
+
+  test('/music setup parses', () => {
+    expect(parseCommand('setup')).toEqual({ do: 'setup', install: false })
+    expect(parseCommand('setup install')).toEqual({ do: 'setup', install: true })
+    expect(parseCommand('doctor')).toEqual({ do: 'setup', install: false })
   })
 })
 

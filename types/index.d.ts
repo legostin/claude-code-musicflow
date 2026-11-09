@@ -62,12 +62,23 @@ export type Library = {
 
 export type Layout = 'below' | 'above'
 
+/** What `/music setup` found, as the panel shows it. */
+export type SetupView = {
+  os: string
+  checks: { key: string; level: 'ok' | 'warn' | 'missing'; label: string; detail: string }[]
+  steps: { id: string; title: string; kind: 'auto' | 'paste' | 'manual'; text: string }[]
+  report: string
+  isReady: boolean
+  isClean: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     musicflow: {
       player: Player
       library: Library
       activity: string | null
+      setup: SetupView | null
     }
   }
 }

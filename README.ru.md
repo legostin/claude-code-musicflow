@@ -5,7 +5,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-c084fc"></a>
   <img alt="Claude Code mod" src="https://img.shields.io/badge/Claude%20Code-mod-d97757">
-  <img alt="macOS · Linux" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-supported-8b84a3">
+  <img alt="macOS · Linux · Windows" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-supported-8b84a3">
   <img alt="mpv + yt-dlp" src="https://img.shields.io/badge/mpv%20%2B%20yt--dlp-powered-f0abfc">
 </p>
 
@@ -46,13 +46,7 @@
 
 ## Установка
 
-Нужны `mpv` и **свежий** `yt-dlp`:
-
-```sh
-brew install mpv yt-dlp        # macOS; в Linux — пакетный менеджер
-```
-
-Затем в промпте сессии Claude Code в терминале:
+В промпте сессии Claude Code в терминале:
 
 ```
 /plugin install musicflow --marketplace legostin/claude-code-musicflow
@@ -65,6 +59,18 @@ claude plugin install musicflow --marketplace legostin/claude-code-musicflow
 ```
 
 В десктоп-приложении, где `/plugin` не работает: нажми **+** рядом с полем ввода, затем **Plugins**, **Add marketplace** с `legostin/claude-code-musicflow`, затем **Add plugin**.
+
+### Настройка: `/music setup`
+
+musicflow нужны [`mpv`](https://mpv.io) (играет звук), **свежий** [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) (находит треки и отдаёт поток) и JS-рантайм для yt-dlp ([deno](https://deno.com) или node 20+). `/music setup` проверяет всё это на твоей машине и исправляет, что может:
+
+| | Что делает `/music setup install` (или **Install** в панели) |
+| --- | --- |
+| **macOS** | `brew install mpv yt-dlp deno`, `brew upgrade yt-dlp`, если он устарел. Без Homebrew: официальный бинарник yt-dlp и deno ставятся в домашнюю папку, mpv — с [brew.sh](https://brew.sh) или mpv.app. |
+| **Linux** | Официальный бинарник yt-dlp в `~/.local/bin` (пакеты дистрибутивов отстают от YouTube) и deno в `~/.deno`, без sudo. `mpv` ставится пакетным менеджером: панель вставит строку `sudo apt-get install …` (dnf, pacman, zypper, apk) в поле ввода, остаётся нажать Enter. |
+| **Windows** | `winget install shinchiro.mpv yt-dlp.yt-dlp DenoLand.Deno` (или scoop). Связь с плеером идёт через named pipe и PowerShell. |
+
+Или нажми в панели **Ask Claude to set it up**: Claude получит результат проверки и поставит остальное, спросив тебя перед всем, что требует sudo.
 
 ## Как пользоваться
 
@@ -81,6 +87,7 @@ claude plugin install musicflow --marketplace legostin/claude-code-musicflow
 | `/music vol <0-100>` | громкость |
 | `/music playlist save <имя>` · `playlist play <имя>` | плейлисты |
 | `/music layout below\|above` | строка под полем ввода (текст, по умолчанию) или полоса над ним с кнопками |
+| `/music setup [install]` | проверить mpv, yt-dlp и остальное на этой машине; поставить, чего не хватает |
 
 При `layout above` у полосы есть горячие клавиши, когда она в фокусе (`ctrl+x tab` или клик): `p` пауза, `n` дальше, `l` лайк, `d` дизлайк, `m` панель.
 
@@ -110,7 +117,7 @@ flowchart LR
 <details>
 <summary><b>Треки перестали играть / «found nothing to play»</b></summary>
 
-YouTube часто меняет плеер, и старый `yt-dlp` перестаёт получать звук. Обнови: `brew upgrade yt-dlp` (или `pipx upgrade yt-dlp`).
+YouTube часто меняет плеер, и старый `yt-dlp` перестаёт получать звук. Запусти `/music setup`: он предупредит, если yt-dlp старше 60 дней, и обновит его.
 </details>
 
 <details>
@@ -128,7 +135,7 @@ YouTube часто меняет плеер, и старый `yt-dlp` перес�
 <details>
 <summary><b>Windows?</b></summary>
 
-Пока нет: плеер общается с `mpv` через Unix-сокет и `nc -U`. PR приветствуются.
+Да, с версии 0.4: mpv слушает named pipe, а мод общается с ним через PowerShell; `/music setup` ставит mpv, yt-dlp и deno через winget или scoop. Эта часть новее, чем macOS и Linux: если что-то не так, открой issue с выводом `/music setup`.
 </details>
 
 <details>

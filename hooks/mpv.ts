@@ -1,50 +1,102 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Player, Track } from '../types'
+import { type IpcTool, type Probe, jsRuntime } from './doctor'
+import { type Host, detectHost, join, mkdirp, probe, rmf } from './platform'
 import { type Candidate, PRINT, parseHits, videoId } from './search'
 
 type $ = EngineInterface
 
-/** Where the binaries and the socket are, resolved once per load. */
+/** Where the binaries and the player's socket are, resolved once per load. */
 export type Env = {
-  home: string
+  host: Host
   dir: string
+  /** A Unix socket path, or a Windows named pipe (\\.\pipe\musicflow-mpv). */
   sock: string
   mpv: string | null
   ytdlp: string | null
+  ipcTool: IpcTool | null
+  /** yt-dlp's --js-runtimes value for YouTube, when one is found. */
+  js: string | null
+  probe: Probe
 }
 
-const BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
-
-async function findBin($: $, name: string): Promise<string | null> {
-  for (const dir of BIN_DIRS) {
-    if (await $.fs.exists(`${dir}/${name}`)) return `${dir}/${name}`
-  }
-  const r = await $.process.run(['/bin/sh', '-lc', `command -v ${name}`]).catch(() => null)
-  const path = r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] : ''
-  return path ? path : null
-}
+const PIPE = 'musicflow-mpv'
 
 export async function resolveEnv($: $): Promise<Env> {
-  const home = (await $.env.get('HOME')) ?? '/tmp'
+  const host = await detectHost($)
   // Kept short: a Unix socket path on macOS holds at most 104 bytes.
-  const dir = `${home}/.claude/musicflow`
-  await $.process.run(['mkdir', '-p', `${dir}/signals`]).catch(() => undefined)
-  const [mpv, ytdlp] = await Promise.all([findBin($, 'mpv'), findBin($, 'yt-dlp')])
-  return { home, dir, sock: `${dir}/mpv.sock`, mpv, ytdlp }
+  const dir = join(host, host.home, '.claude', 'musicflow')
+  await mkdirp($, host, join(host, dir, 'signals'))
+  const found = await probe($, host)
+  return {
+    host,
+    dir,
+    sock: host.os === 'windows' ? `\\\\.\\pipe\\${PIPE}` : `${dir}/mpv.sock`,
+    mpv: found.mpv?.path ?? null,
+    ytdlp: found.ytdlp?.path ?? null,
+    ipcTool: found.ipc,
+    js: jsRuntime(found),
+    probe: found,
+  }
+}
+
+/** Sends JSON lines to a Unix socket and prints the replies (no nc -U, no socat). */
+const PY_CLIENT = [
+  'import sys, socket',
+  's = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(sys.argv[1])',
+  'lines = [l for l in sys.stdin.read().splitlines() if l.strip()]',
+  "s.sendall(('\\n'.join(lines) + '\\n').encode())",
+  "f = s.makefile('r'); n = 0",
+  'while n < len(lines):',
+  '    l = f.readline()',
+  '    if not l: break',
+  '    sys.stdout.write(l)',
+  "    if '\"event\"' not in l: n += 1",
+].join('\n')
+
+/** The same over a Windows named pipe, in the PowerShell every Windows has. */
+const PS_CLIENT = [
+  "$ErrorActionPreference = 'Stop'",
+  `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '${PIPE}', [System.IO.Pipes.PipeDirection]::InOut)`,
+  '$p.Connect(2000)',
+  '$w = New-Object System.IO.StreamWriter($p); $w.AutoFlush = $true',
+  '$r = New-Object System.IO.StreamReader($p)',
+  '$lines = @([Console]::In.ReadToEnd() -split "`r?`n" | Where-Object { $_.Trim() })',
+  'foreach ($l in $lines) { $w.WriteLine($l) }',
+  '$n = 0',
+  'while ($n -lt $lines.Count) { $l = $r.ReadLine(); if ($l -eq $null) { break }; [Console]::Out.WriteLine($l); if ($l -notmatch \'"event"\') { $n++ } }',
+  '$p.Dispose()',
+].join('; ')
+
+function ipcArgv(env: Env): string[] | null {
+  switch (env.ipcTool) {
+    case 'nc':
+      return ['nc', '-U', env.sock]
+    case 'socat':
+      return ['socat', '-', `UNIX-CONNECT:${env.sock}`]
+    case 'python3':
+      return ['python3', '-c', PY_CLIENT, env.sock]
+    case 'powershell':
+      return ['powershell', '-NoProfile', '-NonInteractive', '-Command', PS_CLIENT]
+    default:
+      return null
+  }
 }
 
 /**
- * Sends commands over mpv's JSON IPC in one `nc -U` call: mpv answers each
- * line and closes the connection at our end of input. Resolves the replies in
- * order (undefined for a failed one), or null when nothing listens.
+ * Sends commands over mpv's JSON IPC in one call: mpv answers each line.
+ * Resolves the replies in order (undefined for a failed one), or null when
+ * nothing listens.
  */
 export async function ipc($: $, env: Env, commands: readonly unknown[][]): Promise<(unknown | undefined)[] | null> {
+  const argv = ipcArgv(env)
+  if (!argv) return null
   const input = commands.map((command, i) => JSON.stringify({ command, request_id: i + 1 })).join('\n') + '\n'
-  const r = await $.process.run(['nc', '-U', env.sock], { stdin: input, timeoutMs: 4000 }).catch(() => null)
+  const r = await $.process.run(argv, { stdin: input, timeoutMs: env.host.os === 'windows' ? 8000 : 4000 }).catch(() => null)
   if (!r || r.exitCode !== 0 || r.stdout.trim() === '') return null
   const out: (unknown | undefined)[] = commands.map(() => undefined)
-  for (const line of r.stdout.split('\n')) {
+  for (const line of r.stdout.split(/\r?\n/)) {
     if (!line.trim()) continue
     try {
       const msg = JSON.parse(line) as { request_id?: number; error?: string; data?: unknown }
@@ -63,17 +115,43 @@ export async function isAlive($: $, env: Env): Promise<boolean> {
   return r !== null && r[0] !== undefined
 }
 
+/** mpv's command line: audio only, idle, driven over IPC, YouTube through yt-dlp. */
+export function mpvArgs(env: Pick<Env, 'sock' | 'ytdlp' | 'js'>): string[] {
+  return [
+    '--idle=yes',
+    '--no-video',
+    '--no-terminal',
+    '--force-window=no',
+    '--keep-open=no',
+    '--prefetch-playlist=yes',
+    `--input-ipc-server=${env.sock}`,
+    '--ytdl-format=bestaudio/best',
+    `--script-opts=ytdl_hook-ytdl_path=${env.ytdlp}`,
+    '--volume=70',
+    ...(env.js ? [`--ytdl-raw-options-append=js-runtimes=${env.js}`] : []),
+  ]
+}
+
+const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`
+
 /** Starts the shared mpv daemon if none answers. Resolves whether one runs. */
 export async function ensure($: $, env: Env): Promise<boolean> {
   if (await isAlive($, env)) return true
-  if (!env.mpv || !env.ytdlp) return false
-  await $.process.run(['rm', '-f', env.sock]).catch(() => undefined)
-  const script =
-    'nohup "$0" --idle=yes --no-video --no-terminal --force-window=no --keep-open=no ' +
-    '--prefetch-playlist=yes --input-ipc-server="$1" --ytdl-format=bestaudio/best --script-opts=ytdl_hook-ytdl_path="$2" ' +
-    '--volume=70 >/dev/null 2>&1 &'
-  await $.process.run(['/bin/sh', '-c', script, env.mpv, env.sock, env.ytdlp])
-  for (let i = 0; i < 30; i++) {
+  if (!env.mpv || !env.ytdlp || !env.ipcTool) return false
+  const args = mpvArgs(env)
+  if (env.host.os === 'windows') {
+    // Each argument in double quotes, so a path with spaces stays one argument.
+    const list = args.map(a => psQuote(`"${a}"`)).join(',')
+    await $.process.run(
+      ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Start-Process -WindowStyle Hidden -FilePath ${psQuote(env.mpv)} -ArgumentList @(${list})`],
+      { timeoutMs: 15_000 },
+    )
+  } else {
+    await rmf($, env.host, env.sock)
+    // Detached: the player outlives a reload of the mod.
+    await $.process.run(['/bin/sh', '-c', 'nohup "$0" "$@" >/dev/null 2>&1 &', env.mpv, ...args])
+  }
+  for (let i = 0; i < 40; i++) {
     await $.clock.sleep(100)
     if (await isAlive($, env)) return true
   }

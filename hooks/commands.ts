@@ -16,6 +16,7 @@ export type Action =
   | { do: 'stop' }
   | { do: 'layout'; where: 'below' | 'above' }
   | { do: 'now' }
+  | { do: 'setup'; install: boolean }
   | { do: 'help' }
 
 export const HELP = [
@@ -26,6 +27,7 @@ export const HELP = [
   '/music mood <text|auto> — e.g. "calm focus", or auto to follow the session',
   '/music vol <0-100>',
   '/music playlist save <name> | playlist play <name>',
+  '/music setup [install] — check mpv, yt-dlp and the rest on this machine; install what is missing',
   '/music layout below|above — now-playing under the prompt (text) or above it (band with buttons)',
 ].join('\n')
 
@@ -80,6 +82,9 @@ export function parseCommand(args: string): Action | { error: string } {
     }
     case 'now':
       return { do: 'now' }
+    case 'setup':
+    case 'doctor':
+      return { do: 'setup', install: (rest[0] ?? '').toLowerCase() === 'install' }
     case 'help':
       return { do: 'help' }
     default:
