@@ -16,6 +16,12 @@
 </p>
 
 <p align="center">
+  <a href="assets/demo-soundtrack.mp4"><img src="assets/demo-soundtrack.gif" alt="Claude Code debugging a failing test, then /music soundtrack fading in a track picked for the session" width="100%"></a><br>
+  Debugging a bug, then <code>/music soundtrack</code> — Claude picks a track and it fades in.
+  <a href="assets/demo-soundtrack.mp4">Watch the video</a>.
+</p>
+
+<p align="center">
   <a href="#install">Install</a> ·
   <a href="#use">Use</a> ·
   <a href="#how-it-works">How it works</a> ·
